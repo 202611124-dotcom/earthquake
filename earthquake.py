@@ -4,122 +4,115 @@ import folium
 from streamlit_folium import st_folium
 
 # =========================
-# 페이지 설정
+# 페이지 설정 (가독성 중심)
 # =========================
 st.set_page_config(
-    page_title="Earthquake Risk Dash",
+    page_title="지진 위험도 분석",
     page_icon="🌍",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# 커스텀 스타일 (CSS)
+# 글씨가 잘 보이도록 강제 폰트 색상 지정 (CSS)
 st.markdown("""
     <style>
-    .main { background-color: #0e1117; }
-    .stMetric { background-color: #1e2130; padding: 15px; border-radius: 10px; border: 1px solid #3e4250; }
-    div.stButton > button:first-child {
-        background-color: #ff4b4b; color: white; width: 100%; border-radius: 10px; height: 3em; font-weight: bold;
+    /* 전체 글자색을 진하게 */
+    .main, .stMarkdown, p, h1, h2, h3 {
+        color: #1A1A1A !important;
+    }
+    /* 지표(Metric) 박스 디자인 가독성 강화 */
+    [data-testid="stMetricValue"] {
+        color: #D32F2F !important; /* 강조색 */
+        font-weight: bold;
+    }
+    /* 사이드바 가독성 */
+    .css-1d391kg, .st-eb {
+        background-color: #F8F9FA;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# 데이터 불러오기 (캐싱 처리)
+# 데이터 불러오기
 @st.cache_data
 def load_data():
     return pd.read_csv("earthquake.csv")
 
 df_new = load_data()
 
-# 위험도 및 설정
-risk_dict = {0: '🚨 매우 높음', 1: '✅ 낮음', 2: '⚠️ 중간'}
-colors = {0: '#ff4b4b', 1: '#00d4ff', 2: '#faff00'} # 쌈뽕한 네온 컬러
+# 위험도 및 고대비 색상 설정
+risk_dict = {0: '🔴 위험도 높음', 1: '🔵 위험도 낮음', 2: '🟢 위험도 중간'}
+# 지도에서 잘 보이는 명확한 원색 계열 사용
+colors = {0: '#FF0000', 1: '#007BFF', 2: '#28A745'}
 
 # =========================
-# 사이드바 (컨트롤 패널)
+# 사이드바 설정
 # =========================
 with st.sidebar:
-    st.title("🌍 분석 컨트롤")
-    st.write("분석할 위치의 좌표를 입력하세요.")
+    st.header("📍 위치 입력")
+    st.write("분석할 위도와 경도를 입력하세요.")
     
-    lat = st.number_input("📍 위도 (Latitude)", value=37.5, format="%.4f")
-    lon = st.number_input("📍 경도 (Longitude)", value=127.0, format="%.4f")
-    
-    search_range = st.slider("🔍 분석 범위 (반경 도 단위)", 1, 10, 5)
-    
-    analyze_btn = st.button("분석 시작")
+    lat = st.number_input("위도 (Latitude)", value=37.5, format="%.4f")
+    lon = st.number_input("경도 (Longitude)", value=127.0, format="%.4f")
     
     st.divider()
-    st.info("💡 Tip: 빨간색 점은 위험도가 높은 군집입니다.")
+    analyze_btn = st.button("🔍 위험도 분석 시작", type="primary")
 
 # =========================
 # 메인 컨텐츠
 # =========================
-st.title("📊 세계 지진 위험도 분석 시스템")
-st.caption("AI 기반 군집 분석 데이터를 활용하여 특정 지역의 지진 위험도를 실시간으로 평가합니다.")
+st.title("🌍 세계 지진 위험도 분석 시스템")
+st.write("입력하신 좌표 주변의 과거 지진 데이터를 분석하여 현재 위치의 위험도를 평가합니다.")
 
 if analyze_btn:
-    with st.spinner('주변 데이터를 분석하는 중...'):
-        # 주변 지진 데이터 필터링
-        near_df = df_new[
-            (df_new['위도'] >= lat - search_range) & (df_new['위도'] <= lat + search_range) &
-            (df_new['경도'] >= lon - search_range) & (df_new['경도'] <= lon + search_range)
-        ]
+    # 1. 주변 데이터 필터링 (반경 5도)
+    near_df = df_new[
+        (df_new['위도'] >= lat - 5) & (df_new['위도'] <= lat + 5) &
+        (df_new['경도'] >= lon - 5) & (df_new['경도'] <= lon + 5)
+    ]
 
-        if len(near_df) == 0:
-            st.warning("⚠️ 해당 지역 반경 내에 축적된 지진 데이터가 부족하여 분석이 불가능합니다.")
-        else:
-            # 상단 메트릭 배치
-            cluster_ratio = near_df['cluster'].value_counts(normalize=True)
-            main_cluster = cluster_ratio.idxmax()
-            
-            m_col1, m_col2, m_col3 = st.columns(3)
-            with m_col1:
-                st.metric("예상 위험 등급", risk_dict[main_cluster])
-            with m_col2:
-                st.metric("주변 감지 데이터", f"{len(near_df)}건")
-            with m_col3:
-                st.metric("위험군 비중", f"{cluster_ratio.get(0, 0)*100:.1f}%")
+    if len(near_df) == 0:
+        st.error("❌ 분석 불가: 해당 지역 근처에 지진 데이터가 존재하지 않습니다.")
+    else:
+        # 2. 결과 계산
+        cluster_ratio = near_df['cluster'].value_counts(normalize=True)
+        main_cluster = cluster_ratio.idxmax()
 
-            st.divider()
+        # 3. 분석 결과 상단 배치 (Metric)
+        st.subheader("📊 분석 결과 요약")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("종합 위험도", risk_dict[main_cluster])
+        with c2:
+            st.metric("검색된 지진 수", f"{len(near_df)}건")
+        with c3:
+            st.metric("최대 비중 군집", f"{cluster_ratio.max()*100:.1f}%")
 
-            # 지도 시각화
-            st.subheader("🗺️ 지진 군집 분포 맵")
-            
-            # 다크 모드 타일 적용 (CartoDB dark_matter)
-            m = folium.Map(location=[lat, lon], zoom_start=4, tiles="CartoDB dark_matter")
+        st.divider()
 
-            # 데이터 샘플링 (성능 최적화)
-            df_sample = df_new.sample(min(700, len(df_new)), random_state=42)
+        # 4. 지도 시각화 (가장 밝은 'CartoDB positron' 사용)
+        st.subheader("🗺️ 지진 데이터 분포도")
+        m = folium.Map(location=[lat, lon], zoom_start=5, tiles="CartoDB positron")
 
-            for _, row in df_sample.iterrows():
-                folium.CircleMarker(
-                    location=[row['위도'], row['경도']],
-                    radius=row['규모'] * 1.2, # 규모 강조
-                    color=colors[row['cluster']],
-                    fill=True,
-                    fill_color=colors[row['cluster']],
-                    fill_opacity=0.5,
-                    weight=1
-                ).add_to(m)
+        # 샘플링 데이터 표시 (원본 코드 로직 유지)
+        df_sample = df_new.sample(min(500, len(df_new)), random_state=42)
 
-            # 사용자 위치 (별 모양 아이콘)
-            folium.Marker(
-                location=[lat, lon],
-                popup="분석 지점",
-                icon=folium.Icon(color='white', icon='star', icon_color='black')
+        for _, row in df_sample.iterrows():
+            folium.CircleMarker(
+                location=[row['위도'], row['경도']],
+                radius=row['규모'] * 1.5,
+                color=colors[row['cluster']],
+                fill=True,
+                fill_color=colors[row['cluster']],
+                fill_opacity=0.6
             ).add_to(m)
 
-            # 지도 출력
-            st_folium(m, width="100%", height=600, returned_objects=[])
-            
-            st.success(f"📍 위도 {lat}, 경도 {lon} 주변 {search_range}도 범위 내 분석이 완료되었습니다.")
+        # 사용자 입력 위치 (검정색 핀)
+        folium.Marker(
+            location=[lat, lon],
+            popup="분석 위치",
+            icon=folium.Icon(color='black', icon='info-sign')
+        ).add_to(m)
+
+        st_folium(m, width="100%", height=600, returned_objects=[])
 
 else:
-    # 초기 화면 안내
-    st.markdown("""
-    <div style="text-align: center; padding: 100px; border: 2px dashed #3e4250; border-radius: 20px;">
-        <h3>왼쪽 패널에서 좌표를 입력하고 '분석 시작' 버튼을 클릭하세요.</h3>
-        <p>전 세계 지진 데이터를 시각화하고 잠재적 위험도를 평가합니다.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.info("왼쪽 사이드바에서 위치를 입력한 후 '분석 시작' 버튼을 눌러주세요.")
